@@ -1,5 +1,5 @@
 import sys
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from typing import Iterator, TextIO
 
@@ -19,6 +19,7 @@ class _Tee:
         self.log_file.flush()
 
 
+@contextmanager
 def print_logs(log_path: str | Path) -> Iterator[None]:
     """
         Copy standard output to a .log file while preserving terminal output.
