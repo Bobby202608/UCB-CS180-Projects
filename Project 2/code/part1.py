@@ -157,6 +157,7 @@ def process_2_3(args, image: np.ndarray, D_x: np.ndarray, D_y: np.ndarray, outpu
     orientation_bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
     orientation_image = np.clip(np.rint(orientation_bgr * 255.0), 0, 255).astype(np.uint8)
     orientation_path = os.path.join(output_dir, f"grad_orientation{suffix}.png")
+
     cv2.imwrite(orientation_path, orientation_image)
     print(f"Gradient orientation image saved to: {orientation_path}")
 
@@ -166,6 +167,7 @@ def process_2_3(args, image: np.ndarray, D_x: np.ndarray, D_y: np.ndarray, outpu
     for t in threshold:
         edge = np.where(grad > t, 255, 0).astype(np.uint8)
         edge_path = os.path.join(output_dir, f"bin_edge_{t}{suffix}.png")
+        
         cv2.imwrite(edge_path, edge)
         print(f"Binarized edge image (with threshold {t}) saved to: {edge_path}")
 
