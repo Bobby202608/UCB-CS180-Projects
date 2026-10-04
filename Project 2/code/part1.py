@@ -123,17 +123,22 @@ def process_2_3(args, image: np.ndarray, D_x: np.ndarray, D_y: np.ndarray, outpu
     # a. Gradients in x and y directions
     grad_x = scipy.signal.convolve2d(image, D_x, mode="same")
     grad_y = scipy.signal.convolve2d(image, D_y, mode="same")
-    
-    grad_x_path = os.path.join(output_dir, f"grad_x{suffix}.png")
-    grad_y_path = os.path.join(output_dir, f"grad_y{suffix}.png")
-    
+
+    output_dir = os.path.join(output_dir, suffix if suffix else "")
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    grad_x_path = os.path.join(output_dir, f"grad_x_{suffix}.png")
+    grad_y_path = os.path.join(output_dir, f"grad_y_{suffix}.png")
+
     cv2.imwrite(grad_x_path, grad_x)
     cv2.imwrite(grad_y_path, grad_y)
     print(f"\nGradient images saved to: {grad_x_path} and {grad_y_path}")
     
     # b. Gradient magnitude
     grad = np.sqrt(grad_x ** 2 + grad_y ** 2)
-    grad_path = os.path.join(output_dir, f"grad_magnitude{suffix}.png")
+    grad_path = os.path.join(output_dir, f"grad_magnitude_{suffix}.png")
+
     cv2.imwrite(grad_path, grad)
     print(f"Gradient magnitude image saved to: {grad_path}")
 
@@ -156,7 +161,7 @@ def process_2_3(args, image: np.ndarray, D_x: np.ndarray, D_y: np.ndarray, outpu
 
     orientation_bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
     orientation_image = np.clip(np.rint(orientation_bgr * 255.0), 0, 255).astype(np.uint8)
-    orientation_path = os.path.join(output_dir, f"grad_orientation{suffix}.png")
+    orientation_path = os.path.join(output_dir, f"grad_orientation_{suffix}.png")
 
     cv2.imwrite(orientation_path, orientation_image)
     print(f"Gradient orientation image saved to: {orientation_path}")
@@ -166,7 +171,7 @@ def process_2_3(args, image: np.ndarray, D_x: np.ndarray, D_y: np.ndarray, outpu
     
     for t in threshold:
         edge = np.where(grad > t, 255, 0).astype(np.uint8)
-        edge_path = os.path.join(output_dir, f"bin_edge_{t}{suffix}.png")
+        edge_path = os.path.join(output_dir, f"bin_edge_{t}_{suffix}.png")
         
         cv2.imwrite(edge_path, edge)
         print(f"Binarized edge image (with threshold {t}) saved to: {edge_path}")
@@ -191,13 +196,13 @@ def section_3(args) -> None:
     print("\na. Using Gaussian filter:")
     gaussian = cv2.getGaussianKernel(5, 1) @ cv2.getGaussianKernel(5, 1).T
     image_blur = scipy.signal.convolve2d(image, gaussian, mode="same")
-    process_2_3(args, image_blur, KERNELS["D_x"], KERNELS["D_y"], OUTPUT_DIR_3, "_gaussian")
+    process_2_3(args, image_blur, KERNELS["D_x"], KERNELS["D_y"], OUTPUT_DIR_3, "gaussian")
 
     # b. Use derivative of Gaussian filter
     print("\nb. Using derivative of Gaussian filter:")
     D_x_gaussian = scipy.signal.convolve2d(KERNELS["D_x"], gaussian, mode="full")
     D_y_gaussian = scipy.signal.convolve2d(KERNELS["D_y"], gaussian, mode="full")
-    process_2_3(args, image, D_x_gaussian, D_y_gaussian, OUTPUT_DIR_3, "_d_gaussian")
+    process_2_3(args, image, D_x_gaussian, D_y_gaussian, OUTPUT_DIR_3, "d_gaussian")
 
 
 def parse_args():
