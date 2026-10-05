@@ -165,14 +165,18 @@ def hybrid_image(
     if sigma_high <= 0 or sigma_low <= 0:
         raise ValueError("Error: Gaussian cutoff frequencies must be positive.")
 
+    # 1. Align the images
     img_1_aligned, img_2_aligned = align_images(img_1, img_2, points)
 
-    spatial_high = (sigma_high, sigma_high, 0) if img_1_aligned.ndim == 3 else sigma_high
-    spatial_low = (sigma_low, sigma_low, 0) if img_2_aligned.ndim == 3 else sigma_low
-    
-    img_1_high = img_1_aligned - scipy.ndimage.gaussian_filter(img_1_aligned, spatial_high)
-    img_2_low = scipy.ndimage.gaussian_filter(img_2_aligned, spatial_low)
-    
+    # 2a. Extract low-frequency component of image 2
+    freq_low = (sigma_low, sigma_low, 0) if img_2_aligned.ndim == 3 else sigma_low
+    img_2_low = scipy.ndimage.gaussian_filter(img_2_aligned, freq_low)
+
+    # 2b. Extract high-frequency component of image 1
+    freq_high = (sigma_high, sigma_high, 0) if img_1_aligned.ndim == 3 else sigma_high
+    img_1_high = img_1_aligned - scipy.ndimage.gaussian_filter(img_1_aligned, freq_high)
+
+    # 3. Add the two images
     hybrid = np.clip(img_2_low + img_1_high, 0.0, 1.0)
     
     return img_1_aligned, img_2_aligned, img_1_high, img_2_low, hybrid

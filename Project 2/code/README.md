@@ -47,21 +47,26 @@ pip install -r requirements.txt
 There are two arguments in the command:
 
 - **`--section`**: The section in which the program runs.
-  - For **Part 1**, the acceptable values are `1`, `2` and `3`;
-  - For **Part 2**, the acceptable values are `1`, `2`, `3` and `4`.
+  - The acceptable values are `1`, `2` and `3`;
+  - Part 2.3 and 2.4 are combined. To run them, please use `--section 3` in `part2.py`.
 
 - **`--input`**: The path to the input image.
   - For Part 2.2, 2.3 and 2.4, exactly **two** input image paths are required.
   - For other parts, only one input image path is required.
 
+
 **Sample commands for running Part 1:**
 
 ```
-python code/part1.py --section 1 --input /path/to/selfie.jpg
+python code/part1.py --section 1 --input /path/to/image.jpg
 ```
 
 ```
 python code/part1.py --section 2 --input /path/to/cameraman.png
+```
+
+```
+python code/part1.py --section 3 --input /path/to/cameraman.png
 ```
 
 **Sample commands for running Part 2:**
@@ -73,6 +78,11 @@ python code/part2.py --section 1 --input /path/to/taj.jpg
 ```
 python code/part2.py --section 2 --input /path/to/img1.jpg /path/to/img2.jpg
 ```
+
+```
+python code/part2.py --section 3 --input /path/to/img1.jpg /path/to/img2.jpg
+```
+
 
 #### 4. Special steps for Part 2.2
 
