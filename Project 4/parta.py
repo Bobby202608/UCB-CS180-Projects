@@ -201,7 +201,7 @@ def inverseWarp(img: np.ndarray, H: np.ndarray) -> tuple[np.ndarray, np.ndarray,
 
     # 6. Prepare the ready-to-fill output image
     output = np.zeros(
-        (dst_y_max - dst_y_min + 1, dst_x_max - dst_x_min + 1) + img.shape[2:],
+        (dst_y_max+1 - dst_y_min, dst_x_max+1 - dst_x_min) + img.shape[2:],
         dtype=img.dtype
     )  # shape: (n, m, c) for color, (n, m) for grayscale
 
@@ -219,9 +219,7 @@ def warpImageNearestNeighbor(img: np.ndarray, H: np.ndarray) -> tuple[np.ndarray
     start_time = time.perf_counter()
     src_x, src_y, output = inverseWarp(img, H)
 
-    h, w = img.shape[:2]
-
-    # 1. Find the nearest neighbor with integer coordinates
+    # 1. Find the nearest neighbor pixel with integer coordinates
     x_nearest = np.floor(src_x + 0.5).astype(np.intp)  # shape: (nm, )
     y_nearest = np.floor(src_y + 0.5).astype(np.intp)  # shape: (nm, )
 
@@ -247,14 +245,43 @@ def warpImageBilinear(img: np.ndarray, H: np.ndarray) -> tuple[np.ndarray, float
 
     h, w = img.shape[:2]
 
+    # 1. Find the four surrounding pixels with integer coordinates
 
+    """
+        (x1, y1): upper-left pixel
+        (x2, y1): upper-right pixel
+        (x1, y2): lower-left pixel
+        (x2, y2): lower-right pixel
+    """
 
+    x1 = np.floor(src_x).astype(np.intp)
+    y1 = np.floor(src_y).astype(np.intp)
+    x2 = np.minimum(x1+1, w-1)
+    y2 = np.minimum(y1+1, h-1)
+    # shape: (nm, )
 
+    upper_left = img[y1, x1].astype(np.float64)
+    upper_right = img[y1, x2].astype(np.float64)
+    lower_left = img[y2, x1].astype(np.float64)
+    lower_right = img[y2, x2].astype(np.float64)
+    # shape: (nm, c) for color, (nm, ) for grayscale
 
+    # 2. Compute the weight for each surrounding pixel based on distance
+    dx = src_x - x1
+    dy = src_y - y1
 
+    dx = dx.reshape((-1, ) + (1, ) * (img.ndim - 2))
+    dy = dy.reshape((-1, ) + (1, ) * (img.ndim - 2))
+    # shape: (nm, 1) for color, (nm, ) for grayscale
 
-
-
+    # 3. Conduct warping
+    average = (
+        (1 - dx) * (1 - dy) * upper_left +
+        dx * (1 - dy) * upper_right +
+        (1 - dx) * dy * lower_left +
+        dx * dy * lower_right
+    )
+    output[...] = average.reshape(output.shape)
 
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
