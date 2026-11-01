@@ -6,7 +6,7 @@
 
 **Student ID:** 3043265878
 
-**Date:** October 30, 2026
+**Date:** October 31, 2026
 
 ### File Structure
 
@@ -38,26 +38,46 @@ conda activate CS180
 pip install -r requirements.txt
 ```
 
-#### 3. Configure the program
+#### 3. Prepare the input images
 
-#### 4. Run the program
+Input images should be **in pairs**. Each pair of images should have a **projective** relationship with **the same** center of projection.
+
+#### 4. Configure the program
 
 #### Part A
 
-**Sample commands:**
+There is a configuration center at the beginning of `parta.py` file. You may configure the program on:
+
+- **(1)** Input image paths.
+- **(2)** Coordinates of correspondence points. **Same** number of points for each pair.
+- **(3)** Output directories for each section.
+
+#### 5. Run the program
+
+#### Section A.2
 
 ```
 python code/parta.py --section 2
 ```
 
-#### Part B
+#### Section A.3
 
-**Sample commands:**
+```
+python code/parta.py --section 3
+```
+
+#### Section A.4
+
+```
+python code/parta.py --section 4
+```
+
+#### Part B
 
 ```
 coming soon
 ```
 
-#### 5. Check the output files
+#### 6. Check the output files
 
-After the program finishes running, you may find the output files in `output/partx_y` directory, where "partx_y" represents "Part x Section y".
+After the program finishes running, you may find the output files in your specified output directories.
