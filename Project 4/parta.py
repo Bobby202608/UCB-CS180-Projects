@@ -382,9 +382,11 @@ def main():
         if args.section == "2":
             print("Running Section A.2: Recover Homographies")
             output_dir = OUTPUT_DIR_2
+
         elif args.section == "3":
             print("Running Section A.3: Warp the Images")
             output_dir = OUTPUT_DIR_3
+
         else:
             print("Running Section A.4: Blend the Images into a Mosaic")
             output_dir = OUTPUT_DIR_4
