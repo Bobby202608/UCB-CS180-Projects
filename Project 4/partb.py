@@ -1,6 +1,7 @@
 import argparse
 import cv2
 import datetime
+import json
 import math
 import numpy as np
 import os
@@ -16,6 +17,9 @@ from typing import Iterator, TextIO
 # ==================== Configuration Center (EDITABLE) ====================
 
 # 1. Input image paths
+DOWNTOWN_1_PATH = "input/downtown_1.jpeg"
+DOWNTOWN_2_PATH = "input/downtown_2.jpeg"
+
 TARGET_1_PATH = "input/target_1.jpeg"
 TARGET_2_PATH = "input/target_2.jpeg"
 
@@ -121,8 +125,9 @@ def ANMS(h, coords, n_pts=500, c_robust=0.9):
     distributed corners by retaining those farthest from significantly stronger corners.
     """
 
-    if n_pts <= 0:
+    if n_pts <= 0 or not isinstance(n_pts, int):
         raise ValueError("Error: n_pts must be a positive integer.")
+    
     if not 0 < c_robust < 1:
         raise ValueError("Error: c_robust must be between 0 and 1.")
 
@@ -173,13 +178,89 @@ def draw_corners(im, coords):
     return result
 
 
+# ==================== Section B.2: Feature Descriptor Extraction ====================
+
+def extract_descriptors(im, coords, window_size=40, patch_size=8):
+    """
+        Extract normalized, axis-aligned patch descriptors.
+    """
+
+    if im.ndim != 2:
+        raise ValueError("Error: Input image must be 2D grayscale.")
+
+    if coords.ndim != 2 or coords.shape[0] != 2:
+        raise ValueError("Error: Coordinates must have shape (2, n).")
+
+    for size in (window_size, patch_size):
+        if not isinstance(size, (int, np.integer)) or size <= 0:
+            raise ValueError(
+                "Error: window_size and patch_size must be positive integers."
+            )
+
+    if patch_size > window_size:
+        raise ValueError("Error: patch_size must not exceed window_size.")
+
+    # 1. Gaussian blur the image
+    # ksize=(0, 0): automatically determined kernel size
+    im_blurred = cv2.GaussianBlur(im, ksize=(0, 0), sigmaX=2.0, sigmaY=2.0)
+
+    h, w = im.shape
+    half_size = window_size // 2
+
+    valid_coords = []
+    descriptors = []
+
+    for y, x in coords.T:
+        y, x = int(y), int(x)
+
+        # 2. Extract a 40*40 window around the corner point
+        y_min = y - half_size
+        y_max = y_min + window_size
+        x_min = x - half_size
+        x_max = x_min + window_size
+
+        # Skip out-of-bound windows
+        if y_min < 0 or y_max > h or x_min < 0 or x_max > w:
+            continue
+
+        window = im_blurred[y_min:y_max, x_min:x_max]
+
+        # 3. Downsample the window to a 8*8 patch
+        patch = cv2.resize(window, (patch_size, patch_size), interpolation=cv2.INTER_AREA)
+
+        # 4. Normalize the patch
+        mean = patch.mean()
+        std = patch.std()
+        patch = (patch - mean) / (std + 1e-8)
+
+        valid_coords.append((y, x))  # Shape: (n, 2)
+        descriptors.append(patch.reshape(-1))  # Shape: (n, patch_size ** 2)
+
+    valid_coords = np.asarray(valid_coords, dtype=np.int64).reshape(-1, 2).T  # Shape: (2, n)
+    descriptors = np.asarray(descriptors, dtype=np.float64).reshape(-1, patch_size ** 2)  # Shape: (n, patch_size ** 2)
+
+    return valid_coords, descriptors
 
 
+def draw_descriptors(descriptors, patch_size=8, n_show=16, scale=20):
+    """
+    Build a grid image showing several extracted descriptors.
 
+    Inputs:
+        descriptors: Array of shape (m, patch_size ** 2).
+        patch_size: Side length used during descriptor extraction.
+        n_show: Maximum number of descriptors to display.
+        scale: Enlargement factor for each displayed patch.
 
+    Returns (once implemented):
+        A uint8 grayscale grid image that can be saved with cv2.imwrite.
+    """
 
-
-
+    # TODO 1: Select up to n_show descriptors and reshape them into square patches.
+    # TODO 2: Map values to [0, 255] for display without changing the descriptors.
+    # TODO 3: Enlarge the patches with nearest-neighbor interpolation and arrange
+    #         them in a grid; handle an empty descriptor array explicitly.
+    raise NotImplementedError("Feature descriptor visualization is not implemented yet.")
 
 
 
@@ -222,6 +303,7 @@ def main():
 
         with print_logs(os.path.join(output_dir, f"output_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")):
             for path_1, path_2 in [
+                (DOWNTOWN_1_PATH, DOWNTOWN_2_PATH),
                 (TARGET_1_PATH, TARGET_2_PATH),
                 (GATEWAY_1_PATH, GATEWAY_2_PATH)
             ]:
@@ -238,6 +320,9 @@ def main():
                 if img_2 is None:
                     raise FileNotFoundError(f"Error: Failed to read {path_2}.")
 
+                img_1 = img_1.astype(np.float64)
+                img_2 = img_2.astype(np.float64)
+
                 name_1 = os.path.basename(path_1).split(".")[0]
                 name_2 = os.path.basename(path_2).split(".")[0]
 
@@ -249,44 +334,110 @@ def main():
                 img_2_gray = cv2.cvtColor(img_2, cv2.COLOR_BGR2GRAY)
                 img_2_gray = img_2_gray.astype(np.float64) / 255.0
 
-                # a. Harris corners without ANMS
-                print("\na. Finding Harris corners without ANMS...")
+                # Section B.1: Harris Corner Detection
+                if args.section == "1":
+                    # a. Harris corners without ANMS
+                    print("\na. Finding Harris corners without ANMS...")
 
-                start_time = time.time()
-                h_1, coords_1 = get_harris_corners(img_1_gray)
-                h_2, coords_2 = get_harris_corners(img_2_gray)
-                time_elapsed = time.time() - start_time
+                    start_time = time.time()
+                    h_1, coords_1 = get_harris_corners(img_1_gray)
+                    h_2, coords_2 = get_harris_corners(img_2_gray)
+                    time_elapsed = time.time() - start_time
 
-                print(f"Time elapsed: {time_elapsed:.4f} s")
-                print(f"Number of corners found in {name_1}: {coords_1.shape[1]}")
-                print(f"Number of corners found in {name_2}: {coords_2.shape[1]}")
+                    print(f"Time elapsed: {time_elapsed:.4f} s")
+                    print(f"Number of corners found in {name_1}: {coords_1.shape[1]}")
+                    print(f"Number of corners found in {name_2}: {coords_2.shape[1]}")
 
-                img_1_corners = draw_corners(img_1, coords_1)
-                img_2_corners = draw_corners(img_2, coords_2)
+                    img_1_corners = draw_corners(img_1, coords_1)
+                    img_2_corners = draw_corners(img_2, coords_2)
 
-                # b. Harris corners with ANMS
-                print("\nb. Finding Harris corners with ANMS...")
+                    # b. Harris corners with ANMS
+                    print("\nb. Finding Harris corners with ANMS...")
 
-                start_time = time.time()
-                coords_1_anms = ANMS(h_1, coords_1)
-                coords_2_anms = ANMS(h_2, coords_2)
-                time_elapsed = time.time() - start_time
+                    start_time = time.time()
+                    coords_1_anms = ANMS(h_1, coords_1)
+                    coords_2_anms = ANMS(h_2, coords_2)
+                    time_elapsed = time.time() - start_time
 
-                print(f"Time elapsed: {time_elapsed:.4f} s")
-                print(f"Number of corners found in {name_1}: {coords_1_anms.shape[1]}")
-                print(f"Number of corners found in {name_2}: {coords_2_anms.shape[1]}")
+                    print(f"Time elapsed: {time_elapsed:.4f} s")
+                    print(f"Number of corners found in {name_1}: {coords_1_anms.shape[1]}")
+                    print(f"Number of corners found in {name_2}: {coords_2_anms.shape[1]}\n")
 
-                img_1_corners_anms = draw_corners(img_1, coords_1_anms)
-                img_2_corners_anms = draw_corners(img_2, coords_2_anms)
+                    img_1_corners_anms = draw_corners(img_1, coords_1_anms)
+                    img_2_corners_anms = draw_corners(img_2, coords_2_anms)
 
-                for name, harris, anms in [
-                    (name_1, img_1_corners, img_1_corners_anms),
-                    (name_2, img_2_corners, img_2_corners_anms)
-                ]:
-                    cv2.imwrite(os.path.join(output_dir, f"{name}_harris.png"), harris)
-                    cv2.imwrite(os.path.join(output_dir, f"{name}_anms.png"), anms)
+                    for name, harris, anms in [
+                        (name_1, img_1_corners, img_1_corners_anms),
+                        (name_2, img_2_corners, img_2_corners_anms)
+                    ]:
+                        harris_path = os.path.join(output_dir, f"{name}_harris.png")
+                        anms_path = os.path.join(output_dir, f"{name}_anms.png")
 
-            print(f"\nSaved Harris corners to: {output_dir}")
+                        cv2.imwrite(harris_path, harris)
+                        cv2.imwrite(anms_path, anms)
+
+                        print(f"Harris corners without ANMS, marked on {name}, saved to: {harris_path}")
+                        print(f"Harris corners with ANMS, marked on {name}, saved to: {anms_path}")
+
+                    # Dump the ANMS corner coordinates to a JSON file
+                    for name, image_path, coords in [
+                        (name_1, path_1, coords_1_anms),
+                        (name_2, path_2, coords_2_anms)
+                    ]:
+                        json_path = os.path.join(output_dir, f"{name}_anms.json")
+
+                        with open(json_path, "w", encoding="utf-8") as output_file:
+                            json.dump(
+                                {
+                                    "image_path": image_path,
+                                    "coordinate_order": ["y", "x"],
+                                    "coords": coords.tolist()  # Shape: (2, n)
+                                },
+                                output_file,
+                                indent=2,
+                                ensure_ascii=False
+                            )
+
+                        print(f"ANMS corner coordinates for {name} saved to: {json_path}")
+
+                # Section B.2: Feature Descriptor Extraction
+                elif args.section == "2":
+                    # Load the ANMS corner coordinates from the JSON file
+                    anms_coords = []
+
+                    for name in [name_1, name_2]:
+                        json_path = os.path.join(OUTPUT_DIR_1, f"{name}_anms.json")
+
+                        if not os.path.isfile(json_path):
+                            raise FileNotFoundError(f"Error: {json_path} not found. Run --section 1 first.")
+
+                        with open(json_path, "r", encoding="utf-8") as input_file:
+                            corner_data = json.load(input_file)
+
+                        if not isinstance(corner_data, dict) or corner_data.get("coordinate_order") != ["y", "x"]:
+                            raise ValueError(f"Error: {json_path} must use coordinate_order ['y', 'x'].")
+
+                        coords = np.array(corner_data["coords"], dtype=np.int64)
+                        if coords.ndim != 2 or coords.shape[0] != 2:
+                            raise ValueError(f"Error: Coordinates in {json_path} must have shape (2, n).")
+
+                        anms_coords.append(coords)
+
+                        print(f"Loaded {coords.shape[1]} ANMS corner coordinates for {name} from: {json_path}")
+
+                    coords_1, coords_2 = anms_coords  # Shape: (2, n)
+                    
+                    valid_coords_1, descriptors_1 = extract_descriptors(img_1_gray, coords_1)
+                    valid_coords_2, descriptors_2 = extract_descriptors(img_2_gray, coords_2)
+
+
+
+
+
+
+
+
+
 
     else:
         raise argparse.ArgumentError(None, "Error: Invalid section number. Please choose from 1, 2, 3 or 4.")
