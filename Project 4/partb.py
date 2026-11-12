@@ -125,23 +125,26 @@ def ANMS(h, coords, n_pts=500, c_robust=0.9):
     distributed corners by retaining those farthest from significantly stronger corners.
     """
 
+    if h.shape[0] == 0 or h.shape[1] == 0:  # Shape of h: (h, w)
+        raise ValueError("Error: Harris matrix is empty.")
+
+    cnt = coords.shape[1]  # Shape of coords: (2, n)
+    if cnt == 0:
+        raise ValueError("Error: No Harris corners found in the image.")
+
     if n_pts <= 0 or not isinstance(n_pts, int):
         raise ValueError("Error: n_pts must be a positive integer.")
-    
+
     if not 0 < c_robust < 1:
         raise ValueError("Error: c_robust must be between 0 and 1.")
-
-    n = coords.shape[1]  # Shape of coords: (2, n)
-    if n == 0:
-        raise ValueError("Error: No Harris corners found in the image.")
 
     responses = h[coords[0], coords[1]]
     points = coords.T.astype(np.float64)  # (n, 2)
 
     # Suppression radii: the minimum distance to a "stronger" corner
-    suppress_r = np.full(n, np.inf)
+    suppress_r = np.full(cnt, np.inf)
 
-    for i in range(n):
+    for i in range(cnt):
         # 1. Find "stronger" corners
         stronger = responses[i] < c_robust * responses
         stronger[i] = False
@@ -153,14 +156,14 @@ def ANMS(h, coords, n_pts=500, c_robust=0.9):
 
     # Sort the Harris corners by suppression radius (then response function) in descending order
     idx_order = np.lexsort((-responses, -suppress_r))
-    idx_chosen = idx_order[:min(n_pts, n)]
+    idx_chosen = idx_order[:min(n_pts, cnt)]
 
     return coords[:, idx_chosen]
 
 
 def draw_corners(im, coords):
     """
-        Draws corners on an image.
+    Draws corners on an image.
     """
 
     result = im.copy()
@@ -182,20 +185,21 @@ def draw_corners(im, coords):
 
 def extract_descriptors(im, coords, window_size=40, patch_size=8):
     """
-        Extract normalized, axis-aligned patch descriptors.
+    Extract normalized, axis-aligned patch descriptors.
     """
 
     if im.ndim != 2:
         raise ValueError("Error: Input image must be 2D grayscale.")
 
-    if coords.ndim != 2 or coords.shape[0] != 2:
-        raise ValueError("Error: Coordinates must have shape (2, n).")
+    if im.shape[0] == 0 or im.shape[1] == 0:
+        raise ValueError("Error: Input image is empty.")
+
+    if coords.shape[1] == 0:
+        raise ValueError("Error: No coordinates provided for descriptor extraction.")
 
     for size in (window_size, patch_size):
         if not isinstance(size, (int, np.integer)) or size <= 0:
-            raise ValueError(
-                "Error: window_size and patch_size must be positive integers."
-            )
+            raise ValueError("Error: window_size and patch_size must be positive integers.")
 
     if patch_size > window_size:
         raise ValueError("Error: patch_size must not exceed window_size.")
@@ -242,25 +246,59 @@ def extract_descriptors(im, coords, window_size=40, patch_size=8):
     return valid_coords, descriptors
 
 
-def draw_descriptors(descriptors, patch_size=8, n_show=16, scale=20):
+def draw_descriptors(descriptors, patch_size=8, n_show=10, scale=20):
     """
     Build a grid image showing several extracted descriptors.
-
-    Inputs:
-        descriptors: Array of shape (m, patch_size ** 2).
-        patch_size: Side length used during descriptor extraction.
-        n_show: Maximum number of descriptors to display.
-        scale: Enlargement factor for each displayed patch.
-
-    Returns (once implemented):
-        A uint8 grayscale grid image that can be saved with cv2.imwrite.
     """
 
-    # TODO 1: Select up to n_show descriptors and reshape them into square patches.
-    # TODO 2: Map values to [0, 255] for display without changing the descriptors.
-    # TODO 3: Enlarge the patches with nearest-neighbor interpolation and arrange
-    #         them in a grid; handle an empty descriptor array explicitly.
-    raise NotImplementedError("Feature descriptor visualization is not implemented yet.")
+    if descriptors.shape[0] == 0:
+        raise ValueError("Error: No descriptors to draw.")
+
+    if not isinstance(patch_size, (int, np.integer)) or patch_size <= 0:
+        raise ValueError("Error: patch_size must be a positive integer.")
+
+    if not isinstance(n_show, (int, np.integer)) or n_show < 0:
+        raise ValueError("Error: n_show must be a non-negative integer.")
+
+    if not isinstance(scale, (int, np.integer)) or scale <= 0:
+        raise ValueError("Error: scale must be a positive integer.")
+
+    cnt = min(n_show, descriptors.shape[0])
+    cols = int(np.ceil(np.sqrt(cnt)))
+    rows = int(np.ceil(cnt / cols))
+    tile_size = patch_size * scale  # 8*20 = 160 by default
+
+    # Add 1 pixel of white padding between each row/column of tiles
+    result = np.zeros((rows*tile_size + rows - 1, cols*tile_size + cols - 1), dtype=np.uint8)
+    result.fill(255)
+
+    for i in range(cnt):
+        patch = descriptors[i].reshape(patch_size, patch_size)
+        patch = np.clip(patch * 255, 0, 255).astype(np.uint8)
+        patch = cv2.resize(patch, (tile_size, tile_size), interpolation=cv2.INTER_NEAREST)
+
+        row = i // cols
+        col = i % cols
+        result[row*tile_size + row : row*tile_size + row + tile_size,
+               col*tile_size + col : col*tile_size + col + tile_size] = patch
+
+    return result
+
+
+# ==================== Section B.3: Feature Matching ====================
+
+
+
+
+
+
+
+
+
+
+# ==================== Section B.4: RANSAC for Robust Homography ====================
+
+
 
 
 
@@ -320,9 +358,6 @@ def main():
                 if img_2 is None:
                     raise FileNotFoundError(f"Error: Failed to read {path_2}.")
 
-                img_1 = img_1.astype(np.float64)
-                img_2 = img_2.astype(np.float64)
-
                 name_1 = os.path.basename(path_1).split(".")[0]
                 name_2 = os.path.basename(path_2).split(".")[0]
 
@@ -379,8 +414,8 @@ def main():
                         print(f"Harris corners without ANMS, marked on {name}, saved to: {harris_path}")
                         print(f"Harris corners with ANMS, marked on {name}, saved to: {anms_path}")
 
-                    # Dump the ANMS corner coordinates to a JSON file
-                    for name, image_path, coords in [
+                    # Save the ANMS corner coordinates to a JSON file
+                    for name, img_path, coords in [
                         (name_1, path_1, coords_1_anms),
                         (name_2, path_2, coords_2_anms)
                     ]:
@@ -389,7 +424,7 @@ def main():
                         with open(json_path, "w", encoding="utf-8") as output_file:
                             json.dump(
                                 {
-                                    "image_path": image_path,
+                                    "image_path": img_path,
                                     "coordinate_order": ["y", "x"],
                                     "coords": coords.tolist()  # Shape: (2, n)
                                 },
@@ -426,9 +461,64 @@ def main():
                         print(f"Loaded {coords.shape[1]} ANMS corner coordinates for {name} from: {json_path}")
 
                     coords_1, coords_2 = anms_coords  # Shape: (2, n)
-                    
-                    valid_coords_1, descriptors_1 = extract_descriptors(img_1_gray, coords_1)
-                    valid_coords_2, descriptors_2 = extract_descriptors(img_2_gray, coords_2)
+
+                    # Extract feature descriptors
+                    valid_coords_1, desc_1 = extract_descriptors(img_1_gray, coords_1)
+                    valid_coords_2, desc_2 = extract_descriptors(img_2_gray, coords_2)
+                    print(f"Extracted {desc_1.shape[0]} feature descriptors for {name_1}")
+                    print(f"Extracted {desc_2.shape[0]} feature descriptors for {name_2}")
+
+                    # Draw feature descriptors
+                    desc_1_drawn = draw_descriptors(desc_1, n_show=100)
+                    desc_2_drawn = draw_descriptors(desc_2, n_show=100)
+
+                    for name, img_path, valid_coords, descriptors, drawn in [
+                        (name_1, path_1, valid_coords_1, desc_1, desc_1_drawn),
+                        (name_2, path_2, valid_coords_2, desc_2, desc_2_drawn)
+                    ]:
+                        # a. Save the valid coordinates to a JSON file
+                        coords_path = os.path.join(output_dir, f"{name}_descriptor_coords.json")
+                        with open(coords_path, "w", encoding="utf-8") as output_file:
+                            json.dump(
+                                {
+                                    "image_path": img_path,
+                                    "coordinate_order": ["y", "x"],
+                                    "coords": valid_coords.tolist()
+                                },
+                                output_file,
+                                indent=2,
+                                ensure_ascii=False
+                            )
+                        print(f"Valid descriptor coordinates for {name} saved to: {coords_path}")
+
+                        # b. Save the descriptors to a .npy file
+                        desc_path = os.path.join(output_dir, f"{name}_descriptors.npy")
+                        np.save(desc_path, descriptors)
+                        print(f"Descriptors for {name} saved to: {desc_path}")
+
+                        # c. Save the visualized descriptors
+                        drawn_path = os.path.join(output_dir, f"{name}_descriptors.png")
+                        cv2.imwrite(drawn_path, drawn)
+                        print(f"Descriptor visualization for {name} saved to: {drawn_path}")
+
+                # Section B.3: Feature Matching
+                elif args.section == "3":
+                    pass
+
+
+
+
+
+
+
+
+
+
+
+                # Section B.4: RANSAC for Robust Homography
+                elif args.section == "4":
+                    pass
+
 
 
 
