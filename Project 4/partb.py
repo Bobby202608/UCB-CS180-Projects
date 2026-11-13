@@ -65,7 +65,7 @@ def print_logs(log_path: str | Path) -> Iterator[None]:
 
 # ==================== Section B.1: Harris Corner Detection ====================
 
-def get_harris_corners(im, edge_discard=20):
+def get_harris_corners(im, edge_discard=20, threshold=10.0):
     """
     This function takes a b&w image and an optional amount to discard
     on the edge (default is 20 pixels), and finds all Harris corners
@@ -75,6 +75,8 @@ def get_harris_corners(im, edge_discard=20):
 
     h is the same shape as the original image, im.
     coords is 2 x n (ys, xs).
+    Only local maxima with a Harris response strictly above threshold
+    (an absolute threshold, default 10) are retained.
     """
 
     assert edge_discard >= 20
@@ -83,7 +85,10 @@ def get_harris_corners(im, edge_discard=20):
     # H: Harris matrix, a 2x2 matrix of Gaussian-smoothed image gradient outer products.
     # h: response function, h = 2 * det(H) / (tr(H) + ε)
     h = corner_harris(im, method='eps', sigma=1)
-    coords = peak_local_max(h, min_distance=1)
+    coords = peak_local_max(h, min_distance=1)  # Shape: (n, 2)
+
+    # Keep only corners whose response exceeds the threshold
+    coords = coords[h[coords[:, 0], coords[:, 1]] > threshold]
 
     # Discard points on edge
     edge = edge_discard  # pixels
@@ -91,7 +96,7 @@ def get_harris_corners(im, edge_discard=20):
            (coords[:, 0] < im.shape[0] - edge) & \
            (coords[:, 1] > edge) & \
            (coords[:, 1] < im.shape[1] - edge)
-    coords = coords[mask].T
+    coords = coords[mask].T  # Shape: (2, n)
     return h, coords
 
 
@@ -279,6 +284,7 @@ def draw_descriptors(descriptors, patch_size=8, n_show=10, scale=20):
 
         row = i // cols
         col = i % cols
+
         result[row*tile_size + row : row*tile_size + row + tile_size,
                col*tile_size + col : col*tile_size + col + tile_size] = patch
 
@@ -287,16 +293,93 @@ def draw_descriptors(descriptors, patch_size=8, n_show=10, scale=20):
 
 # ==================== Section B.3: Feature Matching ====================
 
+def match_descriptors(desc_1, desc_2, ratio_thresh=0.7):
+    """
+    Match descriptors with a nearest-neighbor distance ratio test.
+    """
+
+    desc_1 = np.asarray(desc_1, dtype=np.float64)  # Shape: (n1, patch_size**2)
+    desc_2 = np.asarray(desc_2, dtype=np.float64)  # Shape: (n2, patch_size**2)
+
+    if desc_1.shape[0] == 0:
+        raise ValueError("Error: No descriptors in desc_1 to match.")
+    if desc_2.shape[0] == 0:
+        raise ValueError("Error: No descriptors in desc_2 to match.")
+
+    if desc_2.shape[0] < 2:
+        raise ValueError("Error: At least 2 descriptors are required in desc_2 for the ratio test.")
+
+    if desc_1.shape[1] != desc_2.shape[1]:
+        raise ValueError("Error: The descriptors' shapes (patch_size**2) must match.")
+
+    if not 0 <= ratio_thresh <= 1:
+        raise ValueError("Error: ratio_thresh must be between 0 and 1.")
+
+    matches = []
+
+    for i, descriptor in enumerate(desc_1):
+        distances = np.linalg.norm(desc_2 - descriptor, axis=1)
+
+        # best_1: 1st nearest neighbor, best_2: 2nd nearest neighbor
+        best_1, best_2 = np.argsort(distances)[:2]
+
+        if distances[best_1] < ratio_thresh * distances[best_2]:
+            matches.append((i, best_1))
+
+    matches = np.asarray(matches, dtype=np.int64).reshape(-1, 2)
+    return matches
 
 
+def draw_matches(img_1, img_2, coords_1, coords_2, matches):
+    """
+    Draw matched points and connecting lines on two side-by-side BGR images.
+    """
 
+    if img_1.ndim != 3 or img_2.ndim != 3:
+        raise ValueError("Error: Both images must be 3D BGR.")
 
+    if img_1.shape[0] == 0 or img_1.shape[1] == 0:
+        raise ValueError("Error: Input img_1 is empty.")
+    if img_2.shape[0] == 0 or img_2.shape[1] == 0:
+        raise ValueError("Error: Input img_2 is empty.")
 
+    coords_1 = np.asarray(coords_1)
+    coords_2 = np.asarray(coords_2)
+    matches = np.asarray(matches)
 
+    h_1, w_1 = img_1.shape[:2]
+    h_2, w_2 = img_2.shape[:2]
 
+    # Put the two images on a shared canvas
+    # Shared canvas' shape: (max(h_1, h_2), w_1 + w_2), channels: 3
+    result = np.zeros((max(h_1, h_2), w_1 + w_2, 3), dtype=np.uint8)
+    result[:h_1, :w_1] = img_1
+    result[:h_2, w_1:] = img_2
+
+    # Generator for random colors
+    rng = np.random.default_rng(2026)
+
+    for i, j in matches:
+        y_1, x_1 = coords_1[:, i]
+        y_2, x_2 = coords_2[:, j]
+
+        point_1 = (int(x_1), int(y_1))
+        point_2 = (int(x_2) + w_1, int(y_2))
+
+        color = tuple(int(value) for value in rng.integers(64, 256, size=3))
+
+        cv2.line(result, point_1, point_2, color, thickness=1, lineType=cv2.LINE_AA)
+        cv2.circle(result, point_1, radius=4, color=color, thickness=2, lineType=cv2.LINE_AA)
+        cv2.circle(result, point_2, radius=4, color=color, thickness=2, lineType=cv2.LINE_AA)
+
+    return result
 
 
 # ==================== Section B.4: RANSAC for Robust Homography ====================
+
+
+
+
 
 
 
@@ -369,14 +452,15 @@ def main():
                 img_2_gray = cv2.cvtColor(img_2, cv2.COLOR_BGR2GRAY)
                 img_2_gray = img_2_gray.astype(np.float64) / 255.0
 
-                # Section B.1: Harris Corner Detection
+                # ==================== Section B.1: Harris Corner Detection ====================
+
                 if args.section == "1":
                     # a. Harris corners without ANMS
                     print("\na. Finding Harris corners without ANMS...")
 
                     start_time = time.time()
-                    h_1, coords_1 = get_harris_corners(img_1_gray)
-                    h_2, coords_2 = get_harris_corners(img_2_gray)
+                    h_1, coords_1 = get_harris_corners(img_1_gray, threshold=0.5)
+                    h_2, coords_2 = get_harris_corners(img_2_gray, threshold=0.5)
                     time_elapsed = time.time() - start_time
 
                     print(f"Time elapsed: {time_elapsed:.4f} s")
@@ -435,7 +519,9 @@ def main():
 
                         print(f"ANMS corner coordinates for {name} saved to: {json_path}")
 
-                # Section B.2: Feature Descriptor Extraction
+
+                # ==================== Section B.2: Feature Descriptor Extraction ====================
+
                 elif args.section == "2":
                     # Load the ANMS corner coordinates from the JSON file
                     anms_coords = []
@@ -458,14 +544,14 @@ def main():
 
                         anms_coords.append(coords)
 
-                        print(f"Loaded {coords.shape[1]} ANMS corner coordinates for {name} from: {json_path}")
+                        print(f"\nLoaded {coords.shape[1]} ANMS corner coordinates for {name} from: {json_path}")
 
                     coords_1, coords_2 = anms_coords  # Shape: (2, n)
 
                     # Extract feature descriptors
                     valid_coords_1, desc_1 = extract_descriptors(img_1_gray, coords_1)
                     valid_coords_2, desc_2 = extract_descriptors(img_2_gray, coords_2)
-                    print(f"Extracted {desc_1.shape[0]} feature descriptors for {name_1}")
+                    print(f"\nExtracted {desc_1.shape[0]} feature descriptors for {name_1}")
                     print(f"Extracted {desc_2.shape[0]} feature descriptors for {name_2}")
 
                     # Draw feature descriptors
@@ -489,7 +575,7 @@ def main():
                                 indent=2,
                                 ensure_ascii=False
                             )
-                        print(f"Valid descriptor coordinates for {name} saved to: {coords_path}")
+                        print(f"\nValid descriptor coordinates for {name} saved to: {coords_path}")
 
                         # b. Save the descriptors to a .npy file
                         desc_path = os.path.join(output_dir, f"{name}_descriptors.npy")
@@ -501,23 +587,80 @@ def main():
                         cv2.imwrite(drawn_path, drawn)
                         print(f"Descriptor visualization for {name} saved to: {drawn_path}")
 
-                # Section B.3: Feature Matching
+
+                # ==================== Section B.3: Feature Matching ====================
+
                 elif args.section == "3":
-                    pass
+                    coordinates = []
+                    descriptors = []
+
+                    for name in [name_1, name_2]:
+                        coords_path = os.path.join(OUTPUT_DIR_2, f"{name}_descriptor_coords.json")
+                        desc_path = os.path.join(OUTPUT_DIR_2, f"{name}_descriptors.npy")
+
+                        for input_path in [coords_path, desc_path]:
+                            if not os.path.isfile(input_path):
+                                raise FileNotFoundError(f"Error: {input_path} not found. Run --section 2 first.")
+
+                        # Load the valid coordinates
+                        with open(coords_path, "r", encoding="utf-8") as input_file:
+                            corner_data = json.load(input_file)
+
+                        if not isinstance(corner_data, dict) or corner_data.get("coordinate_order") != ["y", "x"]:
+                            raise ValueError(f"Error: {coords_path} must use coordinate_order ['y', 'x'].")
+
+                        coords = np.array(corner_data["coords"], dtype=np.int64)
+                        if coords.ndim != 2 or coords.shape[0] != 2:
+                            raise ValueError(f"Error: Coordinates in {coords_path} must have shape (2, n).")
+
+                        # Load the descriptors
+                        descs = np.load(desc_path, allow_pickle=False)
+
+                        if descs.ndim != 2:
+                            raise ValueError(f"Error: Descriptors in {desc_path} must have shape (n, patch_size**2).")
+
+                        coordinates.append(coords)
+                        descriptors.append(descs)
+
+                        print(f"\nLoaded {coords.shape[1]} valid descriptor coordinates for {name} from: {coords_path}")
+                        print(f"Loaded {descs.shape[0]} feature descriptors for {name} from: {desc_path}")
+
+                    coords_1, coords_2 = coordinates  # Shape: (2, n)
+                    desc_1, desc_2 = descriptors  # Shape: (n, patch_size**2)
+
+                    # Match the descriptors
+                    matches = match_descriptors(desc_1, desc_2)
+                    print(f"\nMatched {len(matches)} descriptors")
+
+                    # Draw the matches
+                    matches_drawn = draw_matches(img_1, img_2, coords_1, coords_2, matches)
+
+                    # a. Save the matches to a JSON file
+                    matches_path = os.path.join(output_dir, f"{name_1}_{name_2}_matches.json")
+                    with open(matches_path, "w", encoding="utf-8") as output_file:
+                        json.dump(
+                            {
+                                "image_1_path": path_1,
+                                "image_2_path": path_2,
+                                "coordinate_order": ["y", "x"],
+                                "matches": matches.tolist()
+                            },
+                            output_file,
+                            indent=2,
+                            ensure_ascii=False
+                        )
+                    print(f"\nMatched descriptor indices for {name_1} and {name_2} saved to: {matches_path}")
+
+                    # b. Save the visualized matches
+                    drawn_path = os.path.join(output_dir, f"{name_1}_{name_2}_matches.png")
+                    cv2.imwrite(drawn_path, matches_drawn)
+                    print(f"Matched descriptor visualization for {name_1} and {name_2} saved to: {drawn_path}")
 
 
+                # ==================== Section B.4: RANSAC for Robust Homography ====================
 
-
-
-
-
-
-
-
-
-                # Section B.4: RANSAC for Robust Homography
                 elif args.section == "4":
-                    pass
+                    matches = []
 
 
 
