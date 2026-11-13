@@ -6,7 +6,7 @@
 
 **Student ID:** 3043265878
 
-**Date:** October 31, 2026
+**Date:** November 12, 2026
 
 ### File Structure
 
@@ -14,7 +14,7 @@
 submission/
 ├── code/
 │   ├── parta.py
-│   ├── partb.py  # coming soon
+│   ├── partb.py
 │   ├── requirements.txt
 │   └── README.md
 └── web/
@@ -52,7 +52,16 @@ There is a configuration center at the beginning of `parta.py` file. You may con
 - **(2)** Coordinates of correspondence points. **Same** number of points for each pair.
 - **(3)** Output directories for each section.
 
+#### Part B
+
+There is a configuration center at the beginning of `partb.py` file. You may configure the program on:
+
+- **(1)** Input image paths.
+- **(2)** Output directories for each section.
+
 #### 5. Run the program
+
+Please run each section sequentially:
 
 #### Section A.2
 
@@ -72,10 +81,28 @@ python code/parta.py --section 3
 python code/parta.py --section 4
 ```
 
-#### Part B
+#### Section B.1
 
 ```
-coming soon
+python code/partb.py --section 1
+```
+
+#### Section B.2
+
+```
+python code/partb.py --section 2
+```
+
+#### Section B.3
+
+```
+python code/partb.py --section 3
+```
+
+#### Section B.4
+
+```
+python code/partb.py --section 4
 ```
 
 #### 6. Check the output files
