@@ -421,7 +421,7 @@ def main():
         homographies = {}
 
         for path_1, path_2, pts_1, pts_2 in [
-            (DOWNTOWN_1_PATH, DOWNTOWN_2_PATH, TARGET_1_PTS, TARGET_2_PTS),
+            (DOWNTOWN_1_PATH, DOWNTOWN_2_PATH, DOWNTOWN_1_PTS, DOWNTOWN_2_PTS),
             (TARGET_1_PATH, TARGET_2_PATH, TARGET_1_PTS, TARGET_2_PTS),
             (GATEWAY_1_PATH, GATEWAY_2_PATH, GATEWAY_1_PTS, GATEWAY_2_PTS)
         ]:
