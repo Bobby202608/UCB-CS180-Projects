@@ -13,6 +13,8 @@ from pathlib import Path
 from skimage.feature import corner_harris, peak_local_max
 from typing import Iterator, TextIO
 
+from parta import compute_H, inverseWarp, warpImageBilinear, blend
+
 
 # ==================== Configuration Center (EDITABLE) ====================
 
@@ -377,20 +379,52 @@ def draw_matches(img_1, img_2, coords_1, coords_2, matches):
 
 # ==================== Section B.4: RANSAC for Robust Homography ====================
 
+def RANSAC_homography(pts_1, pts_2, n_iters=5000, threshold=3.0):
+    """
+    Run RANSAC to find the best homography matrix H.
+    """
+
+    if pts_1.shape[0] < 4 or pts_2.shape[0] < 4:
+        raise ValueError("Error: At least 4 matched point pairs are required for RANSAC.")
+
+    if pts_1.shape[0] != pts_2.shape[0]:
+        raise ValueError("Error: The number of matched point pairs must be the same.")
+
+    if n_iters <= 0 or not isinstance(n_iters, int):
+        raise ValueError("Error: n_iters must be a positive integer.")
+
+    if threshold <= 0:
+        raise ValueError("Error: threshold must be positive.")
+
+    best_mask = np.zeros(pts_1.shape[0], dtype=bool)
+
+    # pts_1, pts_2: shape (n, 2)
+    # pts_1_h: shape (n, 3) (a column of ones added)
+    pts_1_h = np.column_stack((pts_1, np.ones(pts_1.shape[0])))
+
+    for _ in range(n_iters):
+        # 1. Randomly select 4 pairs of points to compute H
+        idx = np.random.choice(pts_1.shape[0], 4, replace=False)
+        H = compute_H(pts_1[idx], pts_2[idx])  # Shape: (3, 3)
+
+        # 2. p' = Hp
+        pts_2_h = (H @ pts_1_h.T).T  # Shape: (n, 3)
+        pts_2_after = pts_2_h[:, :2] / pts_2_h[:, 2:3]  # Shape: (n, 2)
+
+        # 3. Compute inliers
+        distances = np.linalg.norm(pts_2_after - pts_2, axis=1)
+        curr_mask = distances < threshold
+
+        # 4. Update the best mask with more inliers
+        if np.sum(curr_mask) > np.sum(best_mask):
+            best_mask = curr_mask
+
+    # 5. Recompute H with all inliers
+    H = compute_H(pts_1[best_mask], pts_2[best_mask])
+    return H, best_mask
 
 
-
-
-
-
-
-
-
-
-
-
-
-
+# ==================== Main Function ====================
 
 def main():
     parser = argparse.ArgumentParser()
@@ -602,7 +636,7 @@ def main():
                             if not os.path.isfile(input_path):
                                 raise FileNotFoundError(f"Error: {input_path} not found. Run --section 2 first.")
 
-                        # Load the valid coordinates
+                        # a. Load the valid coordinates
                         with open(coords_path, "r", encoding="utf-8") as input_file:
                             corner_data = json.load(input_file)
 
@@ -613,7 +647,7 @@ def main():
                         if coords.ndim != 2 or coords.shape[0] != 2:
                             raise ValueError(f"Error: Coordinates in {coords_path} must have shape (2, n).")
 
-                        # Load the descriptors
+                        # b. Load the descriptors
                         descs = np.load(desc_path, allow_pickle=False)
 
                         if descs.ndim != 2:
@@ -630,7 +664,7 @@ def main():
 
                     # Match the descriptors
                     matches = match_descriptors(desc_1, desc_2)
-                    print(f"\nMatched {len(matches)} descriptors")
+                    print(f"\n{matches.shape[0]} pairs of descriptors matched between {name_1} and {name_2}")
 
                     # Draw the matches
                     matches_drawn = draw_matches(img_1, img_2, coords_1, coords_2, matches)
@@ -660,16 +694,78 @@ def main():
                 # ==================== Section B.4: RANSAC for Robust Homography ====================
 
                 elif args.section == "4":
+                    # a. Load the matched descriptor indices from the JSON file
                     matches = []
 
+                    matches_path = os.path.join(OUTPUT_DIR_3, f"{name_1}_{name_2}_matches.json")
+                    
+                    if not os.path.isfile(matches_path):
+                        raise FileNotFoundError(f"Error: {matches_path} not found. Run --section 3 first.")
 
+                    with open(matches_path, "r", encoding="utf-8") as input_file:
+                        match_data = json.load(input_file)
 
+                    if not isinstance(match_data, dict) or match_data.get("coordinate_order") != ["y", "x"]:
+                        raise ValueError(f"Error: {matches_path} must use coordinate_order ['y', 'x'].")
 
+                    matches = np.asarray(match_data["matches"])
 
+                    if matches.ndim != 2 or matches.shape[1] != 2:
+                        raise ValueError("Error: Matches must have shape (n, 2).")
+                    
+                    if np.unique(matches, axis=0).shape[0] < 4:
+                        raise ValueError("Error: At least 4 unique matches are required for RANSAC.")
 
+                    print(f"\nLoaded {matches.shape[0]} matched descriptor pairs from: {matches_path}")
 
+                    # b. Load the descriptor coordinates
+                    coordinates = []
 
+                    for name in [name_1, name_2]:
+                        coords_path = os.path.join(OUTPUT_DIR_2, f"{name}_descriptor_coords.json")
 
+                        if not os.path.isfile(coords_path):
+                            raise FileNotFoundError(f"Error: {coords_path} not found. Run --section 2 first.")
+
+                        with open(coords_path, "r", encoding="utf-8") as input_file:
+                            corner_data = json.load(input_file)
+
+                        if not isinstance(corner_data, dict) or corner_data.get("coordinate_order") != ["y", "x"]:
+                            raise ValueError(f"Error: {coords_path} must use coordinate_order ['y', 'x'].")
+
+                        coords = np.asarray(corner_data["coords"], dtype=np.int64)
+                        if coords.ndim != 2 or coords.shape[0] != 2:
+                            raise ValueError(f"Error: Coordinates in {coords_path} must have shape (2, n).")
+
+                        coordinates.append(coords)
+                        print(f"Loaded {coords.shape[1]} descriptor coordinates for {name} from: {coords_path}")
+
+                    coords_1, coords_2 = coordinates  # Shape: (2, n)
+
+                    # 1. Based on matched indices, prepare the matched point pairs for RANSAC
+                    pts_1 = coords_1[::-1, matches[:, 0]].T  # Order: (y, x) -> (x, y), Shape: (n, 2)
+                    pts_2 = coords_2[::-1, matches[:, 1]].T  # Order: (y, x) -> (x, y), Shape: (n, 2)
+
+                    print(f"Prepared {pts_1.shape[0]} matched point pairs for RANSAC.")
+
+                    pts_1 = np.asarray(pts_1, dtype=np.float64)
+                    pts_2 = np.asarray(pts_2, dtype=np.float64)
+
+                    # 2. Find the homography matrix H
+                    H, best_mask = RANSAC_homography(pts_1, pts_2)
+                    print(f"\nFound homography matrix H with {np.sum(best_mask)} inliers")
+
+                    # 3. Warp and blend the images (same procedure as in Section A.4)
+                    dst_offset, warped_1, valid_1, _ = warpImageBilinear(img_1, H)
+                    print(f"Warping of {name_1} finished")
+
+                    valid_2 = np.ones(img_2.shape[:2], dtype=np.bool)
+                    mosaic = blend(warped_1, img_2, dst_offset, valid_1, valid_2)
+                    print(f"Blending of {name_1} and {name_2} finished")
+
+                    output_path = os.path.join(output_dir, f"{name_1}_{name_2}.png")
+                    cv2.imwrite(output_path, mosaic)
+                    print(f"Mosaic of {name_1} and {name_2} saved to: {output_path}")
 
 
     else:
